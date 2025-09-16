@@ -1,0 +1,680 @@
+library(yfR)
+library(tidyverse)
+library(DBI)
+library(RSQLite)
+
+# Definizione dei gruppi di ticker come variabili separate
+
+eu_idx <- c(
+  "^STOXX50E", # Euro Stoxx 50 (principali blue-chip area euro)
+  "^STOXX",    # Stoxx Europe 600 (600 aziende Europa)
+  "^GDAXI",    # DAX (principali titoli Germania)
+  "^FCHI",     # CAC 40 (principali titoli Francia)
+  "FTSEMIB.MI",# FTSE MIB (principali titoli Italia)
+  "^FTSE",     # FTSE 100 (UK Londra)
+  "^OMX",      # OMX Stockholm 30 (principali titoli Svezia)
+  "^SSMI"      # SMI (principali titoli Svizzera)
+)
+eu_financials <- c(
+  # Banche
+  "SAN.MC",     # Banco Santander (Spagna)
+  "BBVA.MC",    # BBVA (Spagna)
+  "BNP.PA",     # BNP Paribas (Francia)
+  "INGA.AS",    # ING Group (Olanda)
+  "ISP.MI",     # Intesa Sanpaolo (Italia)
+  "UCG.MI",     # UniCredit (Italia)
+  "GLE.PA",     # Société Générale (Francia)
+  "CBK.DE",     # Commerzbank (Germania)
+  "DBK.DE",     # Deutsche Bank (Germania)
+  "CA.PA",      # Crédit Agricole (Francia)
+  # Assicurazioni
+  "ALV.DE",     # Allianz (Germania)
+  "CS.PA",      # AXA (Francia)
+  "MUV2.DE",    # Munich Re (Germania)
+  "G.MI",       # Generali (Italia)
+  "HNR1.DE",    # Hannover Re (Germania)
+  # Servizi finanziari
+  "DB1.DE",      # Deutsche Börse (Germania)
+  "NEXI.MI"
+)
+
+eu_technology <- c(
+  "ASML.AS",    # ASML Holding (Olanda)
+  "SAP.DE",     # SAP (Germania)
+  "IFX.DE",     # Infineon Technologies (Germania)
+  "STMMI.MI",     # STMicroelectronics (Italia)
+  "ADYEN.AS",   # Adyen (Olanda)
+  "NOKIA.HE",   # Nokia (Finlandia)
+  "CAP.PA",     # Capgemini (Francia)
+  "DSY.PA"      # Dassault Systèmes (Francia)
+)
+
+eu_healthcare <- c(
+  "SAN.PA",     # Sanofi (Francia)
+  "BAYN.DE",    # Bayer (Germania)
+  "MRK.DE",     # Merck KGaA (Germania)
+  "FRE.DE",     # Fresenius (Germania)
+  "SHL.DE",     # Siemens Healthineers (Germania)
+  "EL.PA",      # EssilorLuxottica (Francia)
+  "NOVN.SW",    # Novartis (Svizzera)
+  "ROG.SW",      # Roche (Svizzera)
+  "1AFX.MI"     # Carl Zeiss Meditec
+)
+
+eu_consumer_disc <- c(
+  # Lusso
+  "MC.PA",      # LVMH (Francia)
+  "RMS.PA",     # Hermès (Francia)
+  "KER.PA",     # Kering (Francia)
+  # Automotive
+  "STLAM.MI",    # Stellantis (Italia)
+  "VOW3.DE",    # Volkswagen (Germania)
+  "BMW.DE",     # BMW (Germania)
+  "MBG.DE",     # Mercedes-Benz (Germania)
+  "P911.DE",    # Porsche AG (Germania)
+  "RACE",
+  # Retail
+  "ITX.MC",     # Inditex (Spagna)
+  "ADS.DE",     # Adidas (Germania)
+  "CA.PA"       # Carrefour (Francia)
+)
+
+eu_consumer_staples <- c(
+  "OR.PA",      # L'Oréal (Francia)
+  "BN.PA",      # Danone (Francia)
+  "ABI.BR",     # Anheuser-Busch InBev (Belgio)
+  "RI.PA",      # Pernod Ricard (Francia)
+  "HEN3.DE",    # Henkel (Germania)
+  "BEI.DE",     # Beiersdorf (Germania)
+  "NESN.SW"     # Nestlé (Svizzera)
+)
+
+eu_industrials <- c(
+  "SIE.DE",     # Siemens (Germania)
+  "AIR.PA",     # Airbus (Francia)
+  "SU.PA",      # Schneider Electric (Francia)
+  "SAF.PA",     # Safran (Francia)
+  "DG.PA",      # Vinci (Francia)
+  "DHL.DE",     # Deutsche Post (Germania)
+  "SGO.PA",     # Saint-Gobain (Francia)
+  "RHM.DE",     # Rheinmetall (Germania)
+  "MTX.DE"     # MTU Aero Engines (Germania)
+)
+
+eu_energy <- c(
+  "TTE.PA",     # TotalEnergies (Francia)
+  "ENI.MI",     # Eni (Italia)
+  "RWE.DE",     # RWE (Germania)
+  "EOAN.DE",    # E.ON (Germania)
+  "ENR.DE",     # Siemens Energy (Germania)
+  "REP.MC"      # Repsol (Spagna)
+)
+
+eu_materials <- c(
+  "BAS.DE",     # BASF (Germania)
+  "AI.PA",      # Air Liquide (Francia)
+  "MT.AS",      # ArcelorMittal (Olanda)
+  "1COV.DE",    # Covestro (Germania)
+  "SY1.DE",     # Symrise (Germania)
+  "HEI.DE"      # Heidelberg Materials (Germania)
+)
+
+eu_utilities <- c(
+  "ENEL.MI",    # Enel (Italia)
+  "IBE.MC",     # Iberdrola (Spagna)
+  "ENGI.PA",    # Engie (Francia)
+  "VIE.PA"     # Veolia (Francia)
+)
+
+eu_communication <- c(
+  "DTE.DE",     # Deutsche Telekom (Germania)
+  "ORA.PA",     # Orange (Francia)
+  "TEF.MC",     # Telefónica (Spagna)
+  "TIT.MI",     # TIM (Italia)
+  "VIV.PA",     # Vivendi (Francia)
+  "PUB.PA"      # Publicis Groupe (Francia)
+)
+
+eu_realestate <- c(
+  "VNA.DE",     # Vonovia (Germania)
+  "UNBLF",      # Unibail-Rodamco-Westfield (Olanda)
+  "LEG.DE"      # LEG Immobilien (Germania)
+)
+
+us_idx <- c(
+  "^GSPC",     # S&P 500 (USA, 500 large cap)
+  "^DJI",      # Dow Jones Industrial Average (USA, 30 blue-chip)
+  "^RUT",      # Russell 2000 (mid/small cap USA)
+  "MNQ=F",     # Micro e-mini Nasdaq 100 futures (derivato USA tech)
+  "FNG=F",     # Micro FANG+ Index futures (derivato tech US - FAANG e simili)
+  "^IXIC"      # Nasdaq Composite (tutto il listino Nasdaq USA)
+)
+
+us_financials <- c(
+  # Banche
+  "JPM",        # JPMorgan Chase
+  "BAC",        # Bank of America
+  "WFC",        # Wells Fargo
+  "C",          # Citigroup
+  "GS",         # Goldman Sachs
+  "MS",         # Morgan Stanley
+  "USB",        # U.S. Bancorp
+  "PNC",        # PNC Financial Services
+  "TFC",        # Truist Financial
+  "COF",        # Capital One
+  # Assicurazioni & Payment
+  "BRK-B",      # Berkshire Hathaway
+  "AIG",        # American International Group
+  "PGR",        # Progressive
+  "TRV",        # The Travelers Companies
+  "AXP",        # American Express
+  "V",          # Visa
+  "MA"          # Mastercard
+)
+
+us_technology <- c(
+  "AAPL",       # Apple
+  "MSFT",       # Microsoft
+  "GOOGL",      # Alphabet Class A
+  "GOOG",       # Alphabet Class C
+  "NVDA",       # NVIDIA
+  "META",       # Meta Platforms
+  "TSLA",       # Tesla
+  "CRM",        # Salesforce
+  "ORCL",       # Oracle
+  "ADBE",       # Adobe
+  "NOW",        # ServiceNow
+  "INTC",       # Intel
+  "AMD",        # Advanced Micro Devices
+  "AVGO",       # Broadcom
+  "NFLX",        # Netflix
+  "4SO.BE"      # ServiceNow
+)
+
+us_healthcare <- c(
+  "JNJ",        # Johnson & Johnson
+  "PFE",        # Pfizer
+  "UNH",        # UnitedHealth Group
+  "MRK",        # Merck & Co
+  "ABBV",       # AbbVie
+  "TMO",        # Thermo Fisher Scientific
+  "DHR",        # Danaher
+  "BMY",        # Bristol Myers Squibb
+  "LLY",        # Eli Lilly
+  "GILD",       # Gilead Sciences
+  "AMGN",       # Amgen
+  "CVS",        # CVS Health
+  "CI",         # Cigna
+  "HUM"        # Humana
+)
+
+us_consumer_disc <- c(
+  "AMZN",       # Amazon
+  "HD",         # Home Depot
+  "MCD",        # McDonald's
+  "NKE",        # Nike
+  "SBUX",       # Starbucks
+  "TGT",        # Target
+  "LOW",        # Lowe's
+  "TJX",        # TJX Companies
+  "BKNG",       # Booking Holdings
+  "DIS",        # Walt Disney
+  "F",          # Ford
+  "GM",         # General Motors
+  "CCL",        # Carnival
+  "RCL",        # Royal Caribbean
+  "MAR"         # Marriott International
+)
+
+us_consumer_staples <- c(
+  "WMT",        # Walmart
+  "PG",         # Procter & Gamble
+  "KO",         # Coca-Cola
+  "PEP",        # PepsiCo
+  "COST",       # Costco
+  "CL",         # Colgate-Palmolive
+  "KMB",        # Kimberly-Clark
+  "GIS",        # General Mills
+  "K",          # Kellogg
+  "CPB",        # Campbell Soup
+  "TSN",        # Tyson Foods
+  "PM",         # Philip Morris
+  "MO",         # Altria
+  "EL"          # Estée Lauder
+)
+
+us_industrials <- c(
+  "BA",         # Boeing
+  "CAT",        # Caterpillar
+  "GE",         # General Electric
+  "MMM",        # 3M
+  "HON",        # Honeywell
+  "UPS",        # United Parcel Service
+  "FDX",        # FedEx
+  "LMT",        # Lockheed Martin
+  "RTX",        # Raytheon Technologies
+  "NOC",        # Northrop Grumman
+  "GD",         # General Dynamics
+  "DE",         # Deere & Company
+  "EMR",        # Emerson Electric
+  "ETN",        # Eaton
+  "ITW"         # Illinois Tool Works
+)
+
+us_energy <- c(
+  "XOM",        # Exxon Mobil
+  "CVX",        # Chevron
+  "COP",        # ConocoPhillips
+  "SLB",        # Schlumberger
+  "MPC",        # Marathon Petroleum
+  "PSX",        # Phillips 66
+  "VLO",        # Valero Energy
+  "EOG",        # EOG Resources
+  "KMI",        # Kinder Morgan
+  "OKE",        # ONEOK
+  "WMB",        # Williams Companies
+  "DVN",        # Devon Energy
+  "HAL"         # Halliburton
+)
+
+us_materials <- c(
+  "LIN",        # Linde
+  "APD",        # Air Products & Chemicals
+  "ECL",        # Ecolab
+  "SHW",        # Sherwin-Williams
+  "DD",         # DuPont
+  "DOW",        # Dow Inc.
+  "PPG",        # PPG Industries
+  "FCX",        # Freeport-McMoRan
+  "NEM",        # Newmont
+  "VMC",        # Vulcan Materials
+  "MLM",        # Martin Marietta Materials
+  "CF",         # CF Industries
+  "MOS",        # Mosaic
+  "FMC",        # FMC Corporation
+  "ALB"         # Albemarle
+)
+
+us_utilities <- c(
+  "NEE",        # NextEra Energy
+  "SO",         # Southern Company
+  "DUK",        # Duke Energy
+  "D",          # Dominion Energy
+  "EXC",        # Exelon
+  "AEP",        # American Electric Power
+  "XEL",        # Xcel Energy
+  "PCG",        # PG&E Corporation
+  "SRE",        # Sempra Energy
+  "EIX",        # Edison International
+  "PPL",        # PPL Corporation
+  "ES",         # Eversource Energy
+  "FE",         # FirstEnergy
+  "ETR",        # Entergy
+  "WEC"         # WEC Energy Group
+)
+
+us_communication <- c(
+  "VZ",         # Verizon
+  "T",          # AT&T
+  "CMCSA",      # Comcast
+  "CHTR",       # Charter Communications
+  "DIS",        # Walt Disney
+  "NFLX",       # Netflix
+  "GOOGL",      # Alphabet (YouTube)
+  "META",       # Meta Platforms
+  "SNAP",       # Snap Inc.
+  "PINS",       # Pinterest
+  "MTCH",       # Match Group
+  "EA",         # Electronic Arts
+  "NWSA"        # News Corp
+)
+
+us_realestate <- c(
+  "AMT",        # American Tower
+  "CCI",        # Crown Castle
+  "PLD",        # Prologis
+  "EQIX",       # Equinix
+  "SPG",        # Simon Property Group
+  "WELL",       # Welltower
+  "PSA",        # Public Storage
+  "O",          # Realty Income
+  "DLR",        # Digital Realty Trust
+  "EXR",        # Extended Stay America
+  "AVB",        # AvalonBay Communities
+  "EQR",        # Equity Residential
+  "UDR",        # UDR Inc.
+  "ESS",        # Essex Property Trust
+  "MAA"         # Mid-America Apartment Communities
+)
+
+as_idx <- c(
+  "^HSI",      # Hang Seng Index (Hong Kong)
+  "^N225",     # Nikkei 225 (Giappone)
+  "^AXJO"      # S&P ASX 200 (Australia)
+)
+
+commodities <- c(
+  "CL=F",      # Crude Oil WTI (petrolio USA)
+  "BZ=F",      # Crude Oil Brent (petrolio europeo)
+  "NG=F",      # Natural Gas (USA)
+  "GC=F",      # Gold (oro)
+  "SI=F",      # Silver (argento)
+  "HG=F"       # Copper (rame)
+)
+
+forex <- c(
+  "EURUSD=X",  # Euro / Dollaro USA
+  "USDJPY=X",  # Dollaro USA / Yen giapponese
+  "GBPUSD=X",  # Sterlina britannica / Dollaro USA
+  "USDCHF=X",  # Dollaro USA / Franco svizzero
+  "USDCAD=X",  # Dollaro USA / Dollaro canadese
+  "AUDUSD=X",  # Dollaro australiano / Dollaro USA
+  "NZDUSD=X"   # Dollaro neozelandese / Dollaro USA
+)
+
+# GIAPPONE - Nikkei 225 per settore
+
+asia_japan_tech <- c(
+  "6758.T",     # Sony
+  "6981.T",     # Murata Manufacturing
+  "6594.T",     # Nidec
+  "4689.T",     # Yahoo Japan
+  "4755.T",     # Rakuten
+  "9984.T",     # SoftBank Group
+  "6098.T"      # Recruit Holdings
+)
+
+asia_japan_financials <- c(
+  "8306.T",     # Mitsubishi UFJ Financial Group
+  "8316.T",     # Sumitomo Mitsui Financial Group
+  "8411.T",     # Mizuho Financial Group
+  "8628.T",     # Nomura Holdings
+  "8725.T"      # MS&AD Insurance Group
+)
+
+asia_japan_industrials <- c(
+  "7751.T",     # Canon
+  "6301.T",     # Komatsu
+  "7267.T",     # Honda Motor
+  "7203.T",     # Toyota Motor
+  "7201.T",     # Nissan Motor
+  "9101.T"      # Japan Airlines
+)
+# CINA - Hang Seng per settore
+
+asia_china_tech <- c(
+  "0700.HK",    # Tencent
+  "9988.HK",    # Alibaba Group
+  "1024.HK",    # Kuaishou Technology
+  "3690.HK",    # Meituan
+  "9999.HK",    # NetEase
+  "2018.HK"     # AAC Technologies
+)
+
+asia_china_financials <- c(
+  "0388.HK",    # Hong Kong Exchanges
+  "1398.HK",    # Industrial and Commercial Bank of China
+  "3988.HK",    # Bank of China
+  "0939.HK",    # China Construction Bank
+  "2318.HK"     # Ping An Insurance
+)
+
+asia_china_energy <- c(
+  "0883.HK",    # CNOOC
+  "0857.HK",    # PetroChina
+  "0386.HK"     # Sinopec Corp
+)
+# INDIA - Principali titoli per settore
+
+asia_india_tech <- c(
+  "TCS.NS",     # Tata Consultancy Services
+  "INFY.NS",    # Infosys
+  "WIPRO.NS",   # Wipro
+  "HCLTECH.NS", # HCL Technologies
+  "TECHM.NS"    # Tech Mahindra
+)
+
+asia_india_financials <- c(
+  "HDFCBANK.NS", # HDFC Bank
+  "ICICIBANK.NS", # ICICI Bank
+  "SBIN.NS",     # State Bank of India
+  "KOTAKBANK.NS", # Kotak Mahindra Bank
+  "AXISBANK.NS"  # Axis Bank
+)
+
+asia_india_energy <- c(
+  "RELIANCE.NS", # Reliance Industries
+  "ONGC.NS",     # Oil & Natural Gas Corporation
+  "IOC.NS",      # Indian Oil Corporation
+  "BPCL.NS"      # Bharat Petroleum Corporation
+)
+
+eu_stocks <- c(eu_financials, eu_technology, eu_healthcare, eu_consumer_disc,
+               eu_consumer_staples, eu_industrials, eu_energy, eu_materials,
+               eu_utilities, eu_communication, eu_realestate)
+
+us_stocks <- c(us_financials, us_technology, us_healthcare, us_consumer_disc,
+               us_consumer_staples, us_industrials, us_energy, us_materials,
+               us_utilities, us_communication, us_realestate)
+
+asia_stocks <- c(asia_japan_tech, asia_japan_financials, asia_japan_industrials,
+                 asia_china_tech, asia_china_financials, asia_china_energy,
+                 asia_india_tech, asia_india_financials, asia_india_energy)
+
+# 1. SETTORE TECNOLOGIA GLOBALE (tutti i continenti)
+technology_global <- c(
+  eu_technology,           # Europa: ASML, SAP, Nokia, …
+  us_technology,           # USA: Apple, Microsoft, Google, …
+  asia_japan_tech,         # Giappone: Sony, SoftBank, …
+  asia_china_tech,         # Cina: Tencent, Alibaba, …
+  asia_india_tech          # India: TCS, Infosys, …
+)
+
+# 2. SETTORE FINANZIARIO GLOBALE (tutti i continenti)
+financials_global <- c(
+  eu_financials,           # Europa: Santander, BNP Paribas, …
+  us_financials,           # USA: JPM, BAC, V, MA, …
+  asia_japan_financials,   # Giappone: MUFG, SMFG, …
+  asia_china_financials,   # Cina: ICBC, Bank of China, …
+  asia_india_financials    # India: HDFC Bank, ICICI, …
+)
+
+# 3. SETTORE SANITARIO GLOBALE
+healthcare_global <- c(
+  eu_healthcare,           # Europa: Sanofi, Bayer, Roche, …
+  us_healthcare            # USA: JNJ, Pfizer, UNH, …
+)
+
+# 4. BENI DI CONSUMO DISCREZIONALI GLOBALE
+consumer_disc_global <- c(
+  eu_consumer_disc,        # Europa: LVMH, Hermès, Stellantis, …
+  us_consumer_disc         # USA: Amazon, Tesla, Nike, …
+)
+
+# 5. BENI DI CONSUMO ESSENZIALI GLOBALE
+consumer_staples_global <- c(
+  eu_consumer_staples,     # Europa: Nestlé, L’Oréal, Danone, …
+  us_consumer_staples      # USA: Walmart, P&G, Coca-Cola, …
+)
+
+# 6. SETTORE INDUSTRIALE GLOBALE
+industrials_global <- c(
+  eu_industrials,          # Europa: Siemens, Airbus, Schneider, …
+  us_industrials,          # USA: Boeing, Caterpillar, GE, …
+  asia_japan_industrials   # Giappone: Toyota, Honda, Canon, …
+)
+
+# 7. SETTORE ENERGETICO GLOBALE
+energy_global <- c(
+  eu_energy,               # Europa: TotalEnergies, Eni, RWE, …
+  us_energy,               # USA: ExxonMobil, Chevron, ConocoPhillips, …
+  asia_china_energy,       # Cina: CNOOC, PetroChina, Sinopec, …
+  asia_india_energy        # India: Reliance, ONGC, Bharat Petroleum, …
+)
+
+# 8. SETTORE MATERIALI GLOBALE
+materials_global <- c(
+  eu_materials,            # Europa: BASF, Air Liquide, ArcelorMittal, …
+  us_materials             # USA: Linde, Sherwin-Williams, DuPont, …
+)
+
+# 9. SETTORE UTILITIES GLOBALE
+utilities_global <- c(
+  eu_utilities,            # Europa: Enel, Iberdrola, Engie, …
+  us_utilities             # USA: NextEra, Duke Energy, Southern, …
+)
+
+# 10. SERVIZI DI COMUNICAZIONE GLOBALE
+communication_global <- c(
+  eu_communication,        # Europa: Deutsche Telekom, Orange, Telefónica, …
+  us_communication         # USA: Verizon, AT&T, Comcast, …
+)
+
+# 11. SETTORE IMMOBILIARE GLOBALE
+realestate_global <- c(
+  eu_realestate,           # Europa: Vonovia, Unibail-Rodamco, LEG Immobilien, …
+  us_realestate            # USA: American Tower, Prologis, Equinix, …
+)
+
+complete_universe <- c(
+  eu_idx, us_idx, as_idx,        # Indici geografici
+  commodities, forex,            # Materie prime e valute
+  eu_stocks, us_stocks, asia_stocks  # Titoli individuali per settore
+)
+
+# Scaricare tutto
+ticker_download <- complete_universe
+
+# VARIABILI DI CONTROLLO
+verifica <- FALSE   # TRUE = verifica quali ticker esistono, FALSE = usa tutti senza verificare
+download <- TRUE   # TRUE = procede con il download, FALSE = solo verifica
+
+# INIZIALIZZAZIONE
+ticker_validi <- c()
+ticker_non_validi <- c()
+
+# SEZIONE VERIFICA
+if (verifica == TRUE) {
+  # VERIFICA QUALI TICKER ESISTONO
+  cat("=========================================\n")
+  cat("VERIFICA TICKER (test con 5 giorni)\n")
+  cat("=========================================\n")
+  
+  for(i in ticker_download) {
+    cat("Verificando:", i, "... ")
+    
+    # Test veloce: scarica solo 5 giorni recenti
+    test <- tryCatch({
+      yf_get(tickers = i,
+             first_date = Sys.Date() - 10,
+             last_date = Sys.Date(),
+             freq_data = "daily",
+             be_quiet = TRUE,
+             thresh_bad_data = 0.01)
+    }, error = function(e) NULL, warning = function(w) NULL)
+    
+    if(!is.null(test) && nrow(test) > 0) {
+      cat("✓ VALIDO\n")
+      ticker_validi <- c(ticker_validi, i)
+    } else {
+      cat("✗ NON TROVATO\n")
+      ticker_non_validi <- c(ticker_non_validi, i)
+    }
+  }
+  
+  cat("\n=========================================\n")
+  cat("RISULTATI VERIFICA:\n")
+  cat("Ticker validi:", length(ticker_validi), "\n")
+  cat("Ticker non validi:", length(ticker_non_validi), "\n")
+  cat("=========================================\n\n")
+  
+  if(length(ticker_non_validi) > 0) {
+    cat("Ticker NON TROVATI:\n")
+    print(ticker_non_validi)
+    cat("\n")
+  }
+  
+} else {
+  # Se verifica = FALSE, considera tutti i ticker come validi
+  ticker_validi <- ticker_download
+  cat("=========================================\n")
+  cat("VERIFICA SALTATA\n")
+  cat("Usando tutti i", length(ticker_validi), "ticker senza controllo\n")
+  cat("=========================================\n\n")
+}
+
+# SEZIONE DOWNLOAD
+if (download == TRUE && length(ticker_validi) > 0) {
+  
+  # Chiedi conferma per procedere
+  cat("Procedere con il download completo dei", length(ticker_validi), "ticker? (y/n): ")
+  risposta <- readline()
+  
+  if(tolower(risposta) == "y") {
+    # DOWNLOAD COMPLETO SOLO PER I TICKER VALIDI
+    cat("\n=========================================\n")
+    cat("INIZIO DOWNLOAD COMPLETO\n")
+    cat("=========================================\n")
+    
+    for(i in ticker_validi) {
+      cat("\nScaricando dati completi per:", i, "\n")
+      
+      # Scarica dati per questo ticker
+      data_temp <- tryCatch({
+        yf_get(tickers = i,
+               first_date = as.Date("1900-01-01"),
+               last_date = Sys.Date(),
+               freq_data = "daily",
+               thresh_bad_data = 0.01)
+      }, error = function(e) {
+        cat("ERRORE durante il download di", i, "\n")
+        return(NULL)
+      })
+      
+      # Controlla se ci sono dati
+      if(is.null(data_temp) || nrow(data_temp) == 0) {
+        cat("ATTENZIONE: Nessun dato trovato per", i, "- saltato\n")
+        next
+      }
+      
+      # Rinomina colonne per il database
+      data_temp <- data_temp %>%
+        rename(
+          open = price_open,
+          high = price_high,
+          low = price_low,
+          close = price_close,
+          time = ref_date
+        )
+      
+      # Crea variabile con nome data_TICKER
+      assign(paste0("data_", i), data_temp)
+      
+      # Salva in database
+      con <- dbConnect(RSQLite::SQLite(), paste0(i, ".db"))
+      dbWriteTable(con, "stock_prices", data_temp, overwrite = TRUE)
+      dbDisconnect(con)
+      
+      # Salva anche come CSV
+      write.csv(data_temp, paste0("/Users/user/Desktop/Market Data/", i, ".csv"), row.names = FALSE)
+      
+      cat("Salvato:", nrow(data_temp), "righe\n")
+    }
+    
+    cat("\n=========================================\n")
+    cat("DOWNLOAD COMPLETATO!\n")
+    cat("Ticker scaricati:", length(ticker_validi), "\n")
+    cat("=========================================\n")
+    
+  } else {
+    cat("Download annullato dall'utente.\n")
+  }
+  
+} else if (download == FALSE) {
+  cat("=========================================\n")
+  cat("DOWNLOAD SALTATO (download = FALSE)\n")
+  cat("Ticker pronti per il download:", length(ticker_validi), "\n")
+  cat("=========================================\n")
+} else {
+  cat("Nessun ticker valido trovato per il download!\n")
+}
